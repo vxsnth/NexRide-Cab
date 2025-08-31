@@ -24,7 +24,7 @@ export default function RiderWaiting() {
     const onRideAccepted = (data) => {
       playNotificationSound();
       setStatus(`✅ Driver ${data.driverName} accepted. Preparing ride...`);
-
+      const otp = data.otp;
       const pickupTime = data.pickupTime || new Date().toLocaleTimeString([], {
         hour: '2-digit',
         minute: '2-digit',
@@ -33,7 +33,6 @@ export default function RiderWaiting() {
         hour: '2-digit',
         minute: '2-digit',
       });
-
       setRideDetails({
         driverName: data.driverName,
         driverPhone: data.driverPhone || '9876543210',
@@ -43,6 +42,7 @@ export default function RiderWaiting() {
         dropTime,
         pickup: data.pickup,
         drop: data.drop,
+        otp,
       });
 
       setTimeout(() => {
@@ -56,7 +56,7 @@ export default function RiderWaiting() {
             rideId: data.rideId,
           },
         });
-      }, 120000); 
+      }, 6000); 
     };
 
     socket.on('rideAccepted', onRideAccepted);
@@ -86,6 +86,8 @@ export default function RiderWaiting() {
           <Text style={styles.detail}>Car Number: {rideDetails.carNumber}</Text>
           <Text style={styles.detail}>Driver: {rideDetails.driverName}</Text>
           <Text style={styles.detail}>Phone Number: {rideDetails.driverPhone}</Text>
+          <Text style={[styles.detail, { color: '#FFD700', fontWeight: 'bold' }]}>🔑 OTP: {rideDetails.otp}</Text>
+
         </View>
       )}
     </View>

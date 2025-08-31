@@ -1,41 +1,57 @@
+import { GOOGLE_MAPS_API_KEY } from '@/config';
 import * as Location from 'expo-location';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import MapViewDirections from 'react-native-maps-directions';
 import { socket } from '../sockets/socket';
-
-const GOOGLE_MAPS_APIKEY = 'AIzaSyC0_i2q6-Zp5q6gJXIbvgzo5GL71A_bXX4';
+const GOOGLE_MAPS_APIKEY = GOOGLE_MAPS_API_KEY;
 
 export default function RiderScreen() {
   const { pickupLat, pickupLng, dropLat, dropLng, rideId } = useLocalSearchParams();
   const pickup = { latitude: +pickupLat, longitude: +pickupLng };
   const drop = { latitude: +dropLat, longitude: +dropLng };
+  const router = useRouter();
 
   const [driverCoords, setDriverCoords] = useState(null);
   const [status, setStatus] = useState('waiting');
   const [eta, setEta] = useState(null);
 
   const mapRef = useRef(null);
+  const locationWatcherRef = useRef(null); // optional if you want to track rider location
 
+  // Optional: track rider location for live updates (if needed)
   useEffect(() => {
-    (async () => {
+    const startTracking = async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return;
-      await Location.watchPositionAsync(
+
+      locationWatcherRef.current = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, distanceInterval: 10 },
-        () => {}
+        (loc) => {
+          // Currently we don't use rider coords, but you can forward to server if needed
+        }
       );
-    })();
+    };
+
+    startTracking();
+
+    return () => {
+      if (locationWatcherRef.current) {
+        locationWatcherRef.current.remove();
+        locationWatcherRef.current = null;
+      }
+    };
   }, []);
 
+  // Listen to driver location and rider status
   useEffect(() => {
     const onDriverLocation = ({ rideId: incomingRideId, coords }) => {
       if (incomingRideId === rideId && coords?.latitude && coords?.longitude) {
         setDriverCoords(coords);
         const distanceMeters = getDistance(coords, pickup);
-        const speedKmph = 30; // assumed average city speed
+        const speedKmph = 30; // assumed average speed
         const etaMinutes = Math.max(Math.round((distanceMeters / 1000) / speedKmph * 60), 1);
         setEta(etaMinutes);
       }
@@ -60,6 +76,24 @@ export default function RiderScreen() {
     };
   }, [rideId]);
 
+  // Listen to ride end event
+  useEffect(() => {
+    socket.emit('joinRide', { rideId });
+
+    const onRideEnded = ({ rideId: endedRideId }) => {
+      if (endedRideId === rideId) {
+        console.log('Ride ended, navigating to RideEnd screen');
+        router.push('/rideend');
+      }
+    };
+
+    socket.on('rideEnded', onRideEnded);
+
+    return () => {
+      socket.off('rideEnded', onRideEnded);
+    };
+  }, [rideId]);
+
   return (
     <View style={styles.container}>
       <MapView
@@ -75,10 +109,8 @@ export default function RiderScreen() {
       >
         <Marker coordinate={pickup} title="Pickup" />
         <Marker coordinate={drop} title="Drop" />
-        {driverCoords && (
-            <Marker coordinate={driverCoords} title="Driver" pinColor="blue" />
-        )}
-        
+        {driverCoords && <Marker coordinate={driverCoords} title="Driver" pinColor="blue" />}
+
         {status === 'in_progress' && (
           <MapViewDirections
             origin={pickup}

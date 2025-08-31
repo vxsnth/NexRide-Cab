@@ -1,14 +1,12 @@
-// DriverTracking.tsx (Crash-proof, clean, final)
-
+import { GOOGLE_MAPS_API_KEY } from '@/config';
 import * as Location from 'expo-location';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import MapViewDirections from 'react-native-maps-directions';
 import { socket } from '../../sockets/socket';
-
-const GOOGLE_MAPS_APIKEY = 'AIzaSyC0_i2q6-Zp5q6gJXIbvgzo5GL71A_bXX4';
+const GOOGLE_MAPS_APIKEY = GOOGLE_MAPS_API_KEY;
 
 function getDistanceMeters(coord1, coord2) {
   const toRad = (value) => (value * Math.PI) / 180;
@@ -23,19 +21,22 @@ function getDistanceMeters(coord1, coord2) {
 }
 
 export default function DriverTracking() {
-  const { pickupLat, pickupLng, dropLat, dropLng, rideId } = useLocalSearchParams();
-
+  const { pickupLat, pickupLng, dropLat, dropLng, rideId,otp } = useLocalSearchParams();
   const pickupCoords = { latitude: parseFloat(pickupLat), longitude: parseFloat(pickupLng) };
   const dropCoords = { latitude: parseFloat(dropLat), longitude: parseFloat(dropLng) };
-
+  const router = useRouter();
   const [driverLocation, setDriverLocation] = useState(null);
   const [isNearPickup, setIsNearPickup] = useState(false);
+  const [isNearDrop, setIsNearDrop] = useState(false);
   const [hasPickedUp, setHasPickedUp] = useState(false);
+  const [enteredOtp, setEnteredOtp] = useState('');
   const mapRef = useRef(null);
 
-  useEffect(() => {
-    let subscription = null;
 
+  // ✅ Use a ref for subscription
+  const locationSubscriptionRef = useRef(null);
+
+  useEffect(() => {
     const startLocationTracking = async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
@@ -43,7 +44,7 @@ export default function DriverTracking() {
         return;
       }
 
-      subscription = await Location.watchPositionAsync(
+      locationSubscriptionRef.current = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
           timeInterval: 3000,
@@ -58,8 +59,10 @@ export default function DriverTracking() {
           setDriverLocation(coords);
           socket.emit('driverLocation', { rideId, coords });
 
-          const distance = getDistanceMeters(coords, pickupCoords);
-          setIsNearPickup(distance <= 500000);
+          const distToPickup = getDistanceMeters(coords, pickupCoords);
+          const distToDrop = getDistanceMeters(coords, dropCoords);
+          setIsNearPickup(distToPickup <= 5000); // 50 meters threshold
+          setIsNearDrop(distToDrop <= 5000); // 50 meters threshold
         }
       );
     };
@@ -67,13 +70,23 @@ export default function DriverTracking() {
     startLocationTracking();
 
     return () => {
-      if (subscription) subscription.remove();
+      if (locationSubscriptionRef.current) locationSubscriptionRef.current.remove();
     };
   }, []);
 
-  const confirmRiderPickup = () => {
-    socket.emit('riderPresent', { rideId });
-    setHasPickedUp(true);
+
+  const endRide = () => {
+    // ✅ Stop location tracking
+    if (locationSubscriptionRef.current) {
+      locationSubscriptionRef.current.remove();
+      locationSubscriptionRef.current = null;
+    }
+
+    console.log('Ending ride:', rideId);
+    socket.emit('endRide', { rideId });
+
+    // Navigate driver to end screen
+    router.push('/driver/driverend');
   };
 
   if (!driverLocation) {
@@ -116,8 +129,37 @@ export default function DriverTracking() {
 
       {!hasPickedUp && isNearPickup && (
         <View style={styles.confirmContainer}>
-          <TouchableOpacity style={styles.confirmButton} onPress={confirmRiderPickup}>
-            <Text style={styles.confirmText}>Rider Present - Start Ride 🎉</Text>
+          <Text style={styles.otpLabel}>Enter OTP to Start Ride:</Text>
+          <TextInput
+            style={styles.otpInput}
+            keyboardType="numeric"
+            maxLength={4}
+            placeholder="••••"
+            placeholderTextColor="#999"
+            value={enteredOtp}
+            onChangeText={(text) => {
+              const digits = text.replace(/\D/g, "").slice(0, 4);
+              setEnteredOtp(digits);
+              if (digits.length === 4) {
+                socket.emit("verifyOtp", { rideId, otp: digits }, (res) => {
+                  if (res?.ok) {
+                    socket.emit("riderPresent", { rideId });
+                    setHasPickedUp(true);
+                  } else {
+                    Alert.alert("Invalid OTP", "Please enter the correct OTP.");
+                    setEnteredOtp("");
+                  }
+                });
+              }
+            }}
+          />
+        </View>
+      )}
+
+      {hasPickedUp && isNearDrop && (
+        <View style={styles.confirmContainer}>
+          <TouchableOpacity style={styles.confirmButton} onPress={endRide}>
+            <Text style={styles.confirmText}>End Ride 🏁</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -130,4 +172,6 @@ const styles = StyleSheet.create({
   confirmContainer: { position: 'absolute', bottom: 50, left: 0, right: 0, alignItems: 'center' },
   confirmButton: { backgroundColor: '#FFD700', padding: 14, borderRadius: 8 },
   confirmText: { color: 'black', fontWeight: 'bold' },
+  otpLabel: { color: '#FFD700', fontWeight: 'bold', marginBottom: 8, fontSize: 16},
+  otpInput: {   backgroundColor: 'black', color: '#FFD700', padding: 12, width: 140, textAlign: 'center', fontSize: 20, fontWeight: 'bold', letterSpacing: 6,borderRadius: 10, borderWidth: 2, borderColor: '#FFD700', marginBottom: 12},
 });
