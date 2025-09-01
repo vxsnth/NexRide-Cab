@@ -47,8 +47,8 @@ export default function DriverTracking() {
       locationSubscriptionRef.current = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
-          timeInterval: 3000,
-          distanceInterval: 3,
+          timeInterval: 4000,
+          distanceInterval: 15,
         },
         (location) => {
           if (!location?.coords) return;
@@ -61,8 +61,8 @@ export default function DriverTracking() {
 
           const distToPickup = getDistanceMeters(coords, pickupCoords);
           const distToDrop = getDistanceMeters(coords, dropCoords);
-          setIsNearPickup(distToPickup <= 5000); // 50 meters threshold
-          setIsNearDrop(distToDrop <= 5000); // 50 meters threshold
+          setIsNearPickup(distToPickup <= 500); // 50 meters threshold
+          setIsNearDrop(distToDrop <= 500); // 50 meters threshold
         }
       );
     };
